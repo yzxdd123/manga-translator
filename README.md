@@ -52,21 +52,38 @@
 - macOS 26 / iPadOS 26 / iOS 26 或更新版本（竖排识别依赖新版 Vision 接口）。
 - 只用苹果系统翻译、不用 AI 时，需要先下载日语和简体中文翻译语言：Mac 在“系统设置 → 通用 → 语言与地区 → 翻译语言”，iPhone/iPad 在“设置 → App → 翻译”。
 
-## 安装（从源码构建）
+## 下载安装
 
 Safari 扩展必须装在一个 App 里才能安装。这里的 App 只是一个空壳，只显示一页“如何开启扩展”的说明，所有功能都在扩展里。
 
-### Mac
+### Mac：下载即用
 
-1. 用 Xcode 打开 `MangaTranslator/MangaTranslator.xcodeproj`，在 Signing 里选你自己的开发团队，按 ⌘R 运行。
-2. Safari → 设置 → 扩展，勾选“漫画日译中”，并允许它访问 `read.amazon.co.jp`。如果没有签名，需要先在 Safari 的“开发”菜单里勾选“允许未签名的扩展”。
-3. 打开 Kindle 漫画，点工具栏上的扩展按钮，图标显示“开”即开启自动翻译。
+1. 到 [Releases](https://github.com/yzxdd123/manga-translator/releases/latest) 下载 `MangaTranslator-vX.Y.Z-macOS.zip`，解压后把 `MangaTranslator.app` 拖进“应用程序”文件夹。
+2. 第一次打开：这个版本没有经过苹果公证，双击会提示“无法验证开发者”。点“完成”，再到 **系统设置 → 隐私与安全性**，在页面底部点 **“仍要打开”**。也可以在终端执行：
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/MangaTranslator.app
+   ```
+3. 打开一次 App 后退出即可。然后在 Safari 允许未签名的扩展：Safari → 设置 → 高级，勾选“显示网页开发者功能”；再到 **设置 → 开发者**，勾选 **“允许未签名的扩展”**。
+4. Safari → 设置 → 扩展，勾选“漫画日译中”，并允许它访问 `read.amazon.co.jp`。
+5. 打开 Kindle 漫画，点工具栏上的扩展按钮，图标显示“开”就开启了自动翻译。
 
-### iPad / iPhone
+> “允许未签名的扩展”在 **每次退出 Safari 后会自动关闭**，下次打开 Safari 需要重新勾选（第 3 步），这是苹果对未签名扩展的限制。作者加入付费的 Apple 开发者计划后，会改为经过公证的签名版本，届时就不需要第 2、3 步了。
 
-1. 用 Xcode 打开 `MangaTranslator-iOS/MangaTranslator.xcodeproj`，选你自己的开发团队，连接设备后按 ⌘R 安装（免费 Apple ID 也可以，7 天后需要重新安装）。
-2. 设置 → App → Safari → 扩展 → 漫画日译中：打开开关，并允许访问 `read.amazon.co.jp`。
-3. 在 Safari 打开 Kindle 漫画，点地址栏左侧的页面菜单 → 漫画日译中，开启自动翻译。
+### iPad / iPhone：需要自己用 Xcode 安装
+
+苹果不允许在 iPad / iPhone 上安装来自网页的 App，只能通过 App Store、TestFlight，或者自己用 Xcode 装。目前还没有上架，需要一台装有 Xcode 的 Mac：
+
+1. 下载本仓库（绿色 Code 按钮 → Download ZIP，或 `git clone`）。
+2. 用 Xcode 打开 `MangaTranslator-iOS/MangaTranslator.xcodeproj`。分别选中两个 target（MangaTranslator 和 MangaTranslator Extension），在 Signing & Capabilities 里把 Team 改成你自己的 Apple ID，并把 Bundle Identifier 里的 `local` 改成你自己的前缀（比如 `com.你的名字`）。
+3. 用数据线连接 iPad，在 Xcode 顶部选中它，按 ⌘R 安装。第一次需要在 iPad 的 设置 → 通用 → VPN 与设备管理 里信任你的开发者证书，并在 设置 → 隐私与安全性 里打开“开发者模式”。
+4. 设置 → App → Safari → 扩展 → 漫画日译中：打开开关，并允许访问 `read.amazon.co.jp`。
+5. 在 Safari 打开 Kindle 漫画，点地址栏左侧的页面菜单 → 漫画日译中，开启自动翻译。
+
+> 用免费 Apple ID 安装的 App **7 天后会失效**，到时用 Xcode 再装一次即可（设置和用量记录不会丢失）。付费开发者账号可以装一年。
+
+### 从源码构建 Mac 版
+
+用 Xcode 打开 `MangaTranslator/MangaTranslator.xcodeproj`，在 Signing 里选你自己的开发团队，按 ⌘R 运行，之后同上面的第 3–5 步。
 
 两个工程共用同一份扩展代码，都在 `MangaTranslator/MangaTranslator Extension/`。
 
