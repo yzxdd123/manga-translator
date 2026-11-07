@@ -73,8 +73,12 @@
   async function translate(grabbed) {
     if (results.has(grabbed.sig)) return results.get(grabbed.sig);
     if (!pending.has(grabbed.sig)) {
-      const job = browser.runtime.sendMessage({type: 'translatePage', image: grabbed.image, sig: grabbed.sig, book: bookId()})
-        .then((r) => { if (r && !r.error && !r.notice) results.set(grabbed.sig, r); return r; })
+      const job = browser.runtime.sendMessage({type: 'translatePage', image: grabbed.image, sig: grabbed.sig, book: bookId(), title: document.title.replace(/\s*[-|\uff5c].*Kindle.*$/i, '').trim().slice(0, 60)})
+        .then((r) => {
+          // \u672c\u6b21\u4f1a\u8bdd\u91cc\u518d\u7ffb\u56de\u8fd9\u4e00\u9875\u4e0d\u4f1a\u518d\u82b1\u94b1\uff0c\u5b58\u8d77\u6765\u65f6\u6807\u6210\u201c\u5df2\u7f13\u5b58\u201d\u3002
+          if (r && !r.error && !r.notice) results.set(grabbed.sig, {...r, usage: r.usage && {...r.usage, cached: true}});
+          return r;
+        })
         .finally(() => pending.delete(grabbed.sig));
       pending.set(grabbed.sig, job);
     }
@@ -104,6 +108,8 @@
     status('busy', '\u6b63\u5728\u8bc6\u522b\u5e76\u7ffb\u8bd1\u2026');
     let failed = '';
     let notice = '';
+    const pageUsage = {in: 0, out: 0, cost: 0, unpriced: false, cached: true, any: false, estimated: false};
+    let bookUsage = null;
     await Promise.all(shown.map(async (img) => {
       const src = img.src;
       const grabbed = await grab(img);
@@ -113,11 +119,13 @@
       if (img.src !== src || !cfg.enabled) return;   // \u7ffb\u8bd1\u671f\u95f4\u5df2\u7ffb\u9875
       if (r.error) { failed = r.error; return; }
       if (r.notice) notice = r.notice;
+      addUsage(pageUsage, r);
+      if (r.bookUsage) bookUsage = r.bookUsage;
       render(img, grabbed.sig, r.blocks, grabbed.canvas);
     }));
     if (failed) status('error', failed);
     else if (notice) status('warn', notice);
-    else status('ok', '');
+    else status('ok', usageText(pageUsage, bookUsage));
     prefetch();
   }
 
@@ -149,7 +157,33 @@
     fallbackOverlay = {sig, box: makeBox()};
     Object.assign(fallbackOverlay.box.style, {left: '0', top: '0', width: '100vw', height: '100vh'});
     fill(fallbackOverlay.box, r.blocks, innerHeight);
-    status(r.notice ? 'warn' : 'ok', r.notice || '');
+    const pageUsage = {in: 0, out: 0, cost: 0, unpriced: false, cached: true, any: false, estimated: false};
+    addUsage(pageUsage, r);
+    status(r.notice ? 'warn' : 'ok', r.notice || usageText(pageUsage, r.bookUsage));
+  }
+
+  // ---------- \u7528\u91cf\u663e\u793a ----------
+
+  function addUsage(sum, r) {
+    if (!r.usage) return;
+    sum.any = true;
+    if (r.usage.cached) return;
+    sum.cached = false;
+    sum.in += r.usage.in; sum.out += r.usage.out;
+    if (r.usage.estimated) sum.estimated = true;
+    if (r.usage.cost === null || r.usage.cost === undefined) sum.unpriced = true; else sum.cost += r.usage.cost;
+  }
+
+  const fmtTok = (n) => n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`;
+  const fmtCost = (c) => c === 0 ? '\u00a50' : c < 0.01 ? `\u00a5${c.toFixed(4)}` : c < 1 ? `\u00a5${c.toFixed(3)}` : `\u00a5${c.toFixed(2)}`;
+
+  function usageText(page, book) {
+    if (!page.any && !book) return '';
+    let s;
+    if (!page.any || page.cached) s = '\u672c\u9875\u5df2\u7f13\u5b58\uff0c\u514d\u8d39';
+    else s = `\u672c\u9875 ${page.estimated ? '\u7ea6' : ''}${fmtTok(page.in + page.out)} tokens${page.unpriced ? '' : ' \u2248 ' + fmtCost(page.cost)}`;
+    if (book) s += ` \u00b7 \u672c\u4e66 ${book.pages} \u9875 ${fmtTok(book.in + book.out)} tokens${book.unpriced && !book.cost ? '' : ' \u2248 ' + fmtCost(book.cost)}`;
+    return s;
   }
 
   function removeFallback() { fallbackOverlay?.box.remove(); fallbackOverlay = null; }
@@ -405,6 +439,7 @@
     }
     pill.dataset.kind = kind;
     pill.querySelector('.mt-text').textContent = text || (touch ? '\u5df2\u7ffb\u8bd1 \u00b7 \u6309\u4f4f\u300c\u539f\u300d\u770b\u539f\u6587' : '\u5df2\u7ffb\u8bd1 \u00b7 \u6309\u4f4f \u2325 \u770b\u539f\u6587');
+    pill.title = touch ? '\u6309\u4f4f\u300c\u539f\u300d\u770b\u539f\u6587' : '\u6309\u4f4f \u2325 Option \u6216\u300c\u539f\u300d\u770b\u539f\u6587';
   }
 
   // ---------- \u6837\u5f0f ----------
@@ -422,7 +457,7 @@
     .mt-solid{background:#fff;border-radius:8px}
     .mt-erase{position:absolute}
     .mt-plate{position:absolute;border-radius:40%}
-    .mt-pill{position:fixed;z-index:2147483647;right:14px;bottom:14px;display:flex;align-items:center;gap:6px;max-width:60vw;
+    .mt-pill{position:fixed;z-index:2147483647;right:14px;bottom:14px;display:flex;align-items:center;gap:6px;max-width:calc(100vw - 28px);
       padding:5px 6px 5px 10px;border-radius:16px;background:rgba(30,30,30,.82);color:#fff;font:12px/1.3 -apple-system,sans-serif;opacity:.55;transition:opacity .2s}
     .mt-pill:hover,.mt-pill[data-kind=error],.mt-pill[data-kind=warn]{opacity:1}
     .mt-pill button{all:unset;cursor:pointer;padding:0 4px;opacity:.8;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}

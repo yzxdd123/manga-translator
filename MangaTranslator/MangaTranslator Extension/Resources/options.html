@@ -26,13 +26,17 @@
   #result { margin-top:10px; white-space:pre-wrap; font-size:13px; }
   #result.ok { color:var(--ok); } #result.err { color:var(--err); }
   #saved { color:var(--ok); font-size:13px; opacity:0; transition:opacity .3s; }
+  .usage table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  .usage th, .usage td { text-align:right; padding:4px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .usage th:first-child, .usage td:first-child { text-align:left; white-space:normal; }
+  .usage .big { font-size:20px; font-weight:700; }
   kbd { border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:12px; }
 </style>
 </head>
 <body>
 <main>
   <h1>漫画日译中</h1>
-  <p class="sub">点击 Safari 工具栏的扩展按钮开启或关闭自动翻译；翻页后会自动翻译新页面。按住 <kbd>⌥ Option</kbd> 可临时隐藏译文看原文。</p>
+  <p class="sub">点击 Safari 工具栏的扩展按钮开启或关闭自动翻译；翻页后会自动翻译新页面。按住 <kbd>⌥ Option</kbd>（iPad/iPhone 上按住右下角「原」）可临时隐藏译文看原文。</p>
 
   <section>
     <h2>翻译引擎</h2>
@@ -67,6 +71,10 @@
       <label for="model">模型名称</label>
       <input id="model" type="text" placeholder="以服务商控制台显示的模型名为准" autocomplete="off" spellcheck="false">
 
+      <label for="priceIn">单价（元 / 百万 tokens，用于估算费用）</label>
+      <div class="row"><input id="priceIn" type="text" inputmode="decimal" placeholder="输入单价" autocomplete="off"><input id="priceOut" type="text" inputmode="decimal" placeholder="输出单价" autocomplete="off"></div>
+      <div class="hint" id="priceHint"></div>
+
       <label class="choice"><input id="sendImage" type="checkbox"> <span>同时发送页面图片（模型能看到画面，可纠正识别错字、判断说话人和语气；<b>需模型支持看图</b>，费用更高）</span></label>
 
       <div class="row" style="margin-top:12px">
@@ -84,6 +92,13 @@
     <label class="choice"><input type="radio" name="style" value="solid"> <span><b>白底</b>：完全盖住原文（适合白色气泡）</span></label>
     <label for="fontScale">字号</label>
     <div class="row"><input id="fontScale" type="range" min="0.6" max="1.6" step="0.05" style="flex:1"><span id="fontScaleValue"></span></div>
+  </section>
+
+  <section>
+    <h2>用量统计</h2>
+    <div id="usage" class="usage">暂无记录。</div>
+    <div class="hint">费用 = token 数 × 单价，仅为估算，实际以服务商账单为准（免费额度、缓存折扣等不计入）。接口没返回用量时按字数粗估，会标“约”。读过的页面走缓存，不再计费。</div>
+    <div class="row" style="margin-top:10px"><button id="resetUsage" type="button">清零</button></div>
   </section>
 
   <div class="row"><button id="save" class="primary" type="button">保存</button><span id="saved">已保存</span></div>

@@ -9,6 +9,8 @@ const DEFAULTS = {
   sendImage: false,        // \u628a\u9875\u9762\u56fe\u7247\u4e00\u8d77\u53d1\u7ed9\u6a21\u578b\uff08\u9700\u6a21\u578b\u652f\u6301\u770b\u56fe\uff09
   style: 'auto',           // 'auto' \u81ea\u9002\u5e94 | 'outline' \u900f\u660e\u63cf\u8fb9 | 'soft' \u534a\u900f\u660e | 'solid' \u767d\u5e95
   fontScale: 1,
+  priceIn: '',             // \u81ea\u5b9a\u4e49\u5355\u4ef7\uff08\u5143 / \u767e\u4e07 tokens\uff09\uff0c\u7559\u7a7a\u5219\u6309\u5185\u7f6e\u4ef7\u76ee\u8868
+  priceOut: '',
 };
 
 async function settings() {
@@ -57,6 +59,59 @@ function native(message) {
   });
 }
 
+// ---------- \u7528\u91cf\u4e0e\u8d39\u7528 ----------
+
+// \u5185\u7f6e\u53c2\u8003\u4ef7\uff08\u5143 / \u767e\u4e07 tokens\uff1a[\u8f93\u5165, \u8f93\u51fa]\uff09\uff0c\u6309\u6a21\u578b\u540d\u5339\u914d\uff1b\u4ef7\u683c\u4f1a\u53d8\uff0c\u53ef\u5728\u8bbe\u7f6e\u91cc\u81ea\u5b9a\u4e49\u3002
+const PRICES = [
+  [/glm-4-flashx/i, 0.1, 0.1, '\u667a\u8c31 GLM-4-FlashX'],
+  [/qwen3\.7-flash/i, 0.2, 0.8, 'Qwen3.7-Flash'],
+  [/seed.*mini|doubao.*mini/i, 0.2, 2, '\u8c46\u5305 Seed Mini'],
+  [/claude-haiku-5/i, 0.7, 3.5, 'Claude Haiku 5.5'],
+  [/deepseek/i, 2, 8, 'DeepSeek\uff08\u6309\u5cf0\u65f6\u4ef7\uff09'],
+  [/gemini-3\.1-flash-lite/i, 1.75, 10.5, 'Gemini 3.1 Flash-Lite'],
+  [/gpt-5\.4-mini/i, 5.25, 31.5, 'GPT-5.4 Mini'],
+];
+
+function priceOf(cfg) {
+  const pin = parseFloat(cfg.priceIn), pout = parseFloat(cfg.priceOut);
+  if (Number.isFinite(pin) && Number.isFinite(pout) && pin >= 0 && pout >= 0) return {in: pin, out: pout, name: '\u81ea\u5b9a\u4e49\u5355\u4ef7'};
+  const row = PRICES.find(([re]) => re.test(cfg.model || ''));
+  return row ? {in: row[1], out: row[2], name: row[3]} : null;
+}
+
+function costOf(usage, price) {
+  return price ? (usage.in * price.in + usage.out * price.out) / 1e6 : null;
+}
+
+const blankStats = () => ({in: 0, out: 0, cost: 0, pages: 0, unpriced: 0, t: 0});
+let statsQueue = Promise.resolve();   // \u4e32\u884c\u8bfb\u5199\uff0c\u907f\u514d\u5e76\u53d1\u7ffb\u8bd1\u65f6\u4e92\u76f8\u8986\u76d6
+
+function recordUsage(book, usage) {
+  const job = statsQueue.then(async () => {
+    const s = (await browser.storage.local.get('usageStats')).usageStats || {total: blankStats(), books: {}, since: Date.now()};
+    const add = (a) => {
+      a.in += usage.in; a.out += usage.out; a.pages += 1; a.t = Date.now();
+      if (usage.cost === null) a.unpriced += 1; else a.cost += usage.cost;
+      return a;
+    };
+    add(s.total);
+    s.books[book] = add(s.books[book] || blankStats());
+    if (usage.title) s.books[book].title = usage.title;
+    const keep = Object.entries(s.books).sort((a, b) => b[1].t - a[1].t).slice(0, 50);
+    s.books = Object.fromEntries(keep);
+    await browser.storage.local.set({usageStats: s});
+    return s.books[book];
+  });
+  statsQueue = job.catch(() => {});
+  return job;
+}
+
+async function bookStats(book) {
+  await statsQueue;
+  const s = (await browser.storage.local.get('usageStats')).usageStats;
+  return s?.books?.[book] || null;
+}
+
 // ---------- AI \u7ffb\u8bd1 ----------
 
 const SYSTEM_PROMPT = `\u4f60\u662f\u8d44\u6df1\u65e5\u6f2b\u6c49\u5316\u7ec4\u7684\u8bd1\u8005\u517c\u5d4c\u5b57\u6da6\u8272\uff0c\u628a\u65e5\u6587\u6f2b\u753b\u5bf9\u767d\u7ffb\u6210\u5730\u9053\u7684\u7b80\u4f53\u4e2d\u6587\u3002
@@ -85,7 +140,7 @@ async function aiTranslate(blocks, cfg, book, imageDataUrl) {
     ? [{type: 'image_url', image_url: {url: imageDataUrl}}, {type: 'text', text: prompt}]
     : prompt;
   // \u7528\u6d41\u5f0f\u8fd4\u56de\uff1a\u4f1a\u201c\u601d\u8003\u201d\u7684\u6a21\u578b\u53ef\u80fd\u5f88\u4e45\u624d\u51fa\u7b2c\u4e00\u4e2a\u5b57\uff0c\u6d41\u5f0f\u4e0b\u53ea\u8981\u670d\u52a1\u7aef\u6301\u7eed\u53d1\u6570\u636e\u5c31\u4e0d\u4f1a\u8d85\u65f6\u3002
-  const body = {model: cfg.model, messages: [{role: 'system', content: system}, {role: 'user', content: userContent}], response_format: {type: 'json_object'}, stream: true};
+  const body = {model: cfg.model, messages: [{role: 'system', content: system}, {role: 'user', content: userContent}], response_format: {type: 'json_object'}, stream: true, stream_options: {include_usage: true}};
 
   const url = cfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
   // \u963f\u91cc\u4e91\u767e\u70bc\u7684 Qwen \u9ed8\u8ba4\u53ef\u80fd\u5148\u201c\u601d\u8003\u201d\u518d\u56de\u7b54\uff0c\u7ffb\u8bd1\u7528\u4e0d\u7740\uff0c\u5173\u6389\u80fd\u5feb\u5f88\u591a\u3002
@@ -104,9 +159,10 @@ async function aiTranslate(blocks, cfg, book, imageDataUrl) {
   };
   let reply = await send();
   // \u670d\u52a1\u5546\u4e0d\u652f\u6301\u67d0\u4e2a\u53c2\u6570\u65f6\uff0c\u53bb\u6389\u5b83\u518d\u8bd5\uff08JSON \u6a21\u5f0f\u3001\u5173\u95ed\u601d\u8003\u3001\u6d41\u5f0f\uff09\u3002
-  for (const [param, pattern] of [['response_format', /response_format|json_object|json mode/i], ['enable_thinking', /enable_thinking|thinking/i], ['stream', /stream/i]]) {
+  for (const [param, pattern] of [['stream_options', /stream_options|include_usage/i], ['response_format', /response_format|json_object|json mode/i], ['enable_thinking', /enable_thinking|thinking/i], ['stream', /stream/i]]) {
     if (reply.status !== 400 || !(param in body) || !pattern.test(reply.body)) continue;
     delete body[param];
+    if (param === 'stream') delete body.stream_options;
     reply = await send();
   }
   if (reply.status < 200 || reply.status >= 300) {
@@ -114,7 +170,17 @@ async function aiTranslate(blocks, cfg, book, imageDataUrl) {
     try { detail = JSON.parse(reply.body).error?.message || detail; } catch {}
     throw new Error(`AI \u63a5\u53e3\u8fd4\u56de ${reply.status}\uff1a${detail}`);
   }
-  const content = JSON.parse(reply.body).choices?.[0]?.message?.content || '';
+  const parsed = JSON.parse(reply.body);
+  const content = parsed.choices?.[0]?.message?.content || '';
+  // token \u7528\u91cf\uff1a\u4f18\u5148\u7528\u63a5\u53e3\u8fd4\u56de\u7684\u6570\u5b57\uff1b\u6ca1\u6709\u5c31\u6309\u5b57\u6570\u7c97\u4f30\uff08\u4e2d\u65e5\u6587\u7ea6 1 \u5b57 \u2248 1 token\uff09\u3002
+  const u = parsed.usage || {};
+  let usage;
+  if (Number.isFinite(u.prompt_tokens) || Number.isFinite(u.input_tokens)) {
+    usage = {in: u.prompt_tokens ?? u.input_tokens ?? 0, out: u.completion_tokens ?? u.output_tokens ?? 0, estimated: false};
+  } else {
+    usage = {in: Math.ceil((system.length + prompt.length) * 0.9) + (imageDataUrl ? 1200 : 0), out: Math.ceil(content.length * 0.9), estimated: true};
+  }
+  usage.cost = costOf(usage, priceOf(cfg));
   const json = JSON.parse(content.replace(/<think>[\s\S]*?<\/think>/g, '').match(/\{[\s\S]*\}/)?.[0] || 'null');
   if (!json || !Array.isArray(json.translations)) throw new Error('AI \u8fd4\u56de\u683c\u5f0f\u65e0\u6cd5\u89e3\u6790');
 
@@ -127,7 +193,7 @@ async function aiTranslate(blocks, cfg, book, imageDataUrl) {
     glossary[book] = Object.fromEntries(keys.map((k) => [k, merged[k]]));
     await browser.storage.local.set({glossary});
   }
-  return texts;
+  return {texts, usage};
 }
 
 /// \u7ed9\u53d1\u9001\u7ed9\u6a21\u578b\u7684\u56fe\u7247\u6807\u4e0a\u7f16\u53f7\uff0c\u5e76\u538b\u5230 1600px \u4ee5\u5185\u4ee5\u8282\u7701\u8d39\u7528\u3002
@@ -156,20 +222,22 @@ async function annotateImage(dataUrl, blocks) {
 
 // ---------- \u6574\u9875\u6d41\u7a0b ----------
 
-async function translatePage({image, sig, book}) {
+async function translatePage({image, sig, book, title}) {
   const cfg = await settings();
   const key = await cacheKey(sig || image.slice(-200), cfg);
   const cached = await recall(key);
-  if (cached) return cached;
+  // \u7f13\u5b58\u547d\u4e2d\u4e0d\u82b1\u94b1\uff1a\u672c\u9875\u7528\u91cf\u8bb0\u4e3a 0\uff0c\u9644\u4e0a\u672c\u4e66\u7d2f\u8ba1\u3002
+  if (cached) return {...cached, usage: cached.usage ? {...cached.usage, cached: true} : undefined, bookUsage: await bookStats(book)};
   const ocr = await native({action: 'ocr', image});
   const blocks = ocr.blocks || [];
   if (!blocks.length) { const empty = {blocks: []}; await remember(key, empty); return empty; }
 
-  let texts = null, notice = '';
+  let texts = null, notice = '', usage = null, bookUsage = null;
   if (cfg.engine === 'ai' && cfg.baseUrl && cfg.apiKey && cfg.model) {
     try {
       const annotated = cfg.sendImage ? await annotateImage(image, blocks) : null;
-      texts = await aiTranslate(blocks, cfg, book, annotated);
+      ({texts, usage} = await aiTranslate(blocks, cfg, book, annotated));
+      bookUsage = await recordUsage(book, {...usage, title}).catch(() => null);
     } catch (error) {
       notice = `AI \u7ffb\u8bd1\u5931\u8d25\uff0c\u5df2\u6539\u7528\u7cfb\u7edf\u7ffb\u8bd1\uff1a${error.message || error}`;
     }
@@ -189,11 +257,12 @@ async function translatePage({image, sig, book}) {
   }
 
   const result = {blocks: blocks.map((b, i) => ({...b, text: texts[i] || ''})).filter((b) => b.text.trim()), notice};
+  if (usage) result.usage = usage;
   const prev = history.get(book) || [];
   prev.push(...result.blocks.map((b) => ({source: b.source, text: b.text})));
   history.set(book, prev.slice(-24));
   if (!notice) await remember(key, result);
-  return result;
+  return {...result, bookUsage: bookUsage || await bookStats(book)};
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
@@ -214,10 +283,15 @@ browser.runtime.onMessage.addListener((message, sender) => {
     const source = '\u3046\u308b\u305b\u3047\uff01\u3066\u3081\u3047\u306b\u8a00\u308f\u308c\u308b\u7b4b\u5408\u3044\u306f\u306d\u3047\u3093\u3060\u3088\uff01';
     const started = Date.now();
     return aiTranslate([{source, vertical: true}], cfg, '__test__', null)
-      .then((texts) => (texts[0] ? {source, text: texts[0], ms: Date.now() - started} : {error: '\u6a21\u578b\u6ca1\u6709\u8fd4\u56de\u8bd1\u6587'}))
+      .then(({texts, usage}) => (texts[0] ? {source, text: texts[0], ms: Date.now() - started, usage, price: priceOf(cfg)} : {error: '\u6a21\u578b\u6ca1\u6709\u8fd4\u56de\u8bd1\u6587'}))
       .catch((error) => ({error: String(error.message || error)}));
   }
   if (message.type === 'openOptions') return browser.runtime.openOptionsPage();
+  if (message.type === 'getUsage') {
+    return statsQueue.then(async () => ({stats: (await browser.storage.local.get('usageStats')).usageStats || null, price: priceOf(message.cfg || await settings())}));
+  }
+  if (message.type === 'priceOf') return Promise.resolve(priceOf(message.cfg));
+  if (message.type === 'resetUsage') return browser.storage.local.remove('usageStats').then(() => ({ok: true}));
   return undefined;
 });
 

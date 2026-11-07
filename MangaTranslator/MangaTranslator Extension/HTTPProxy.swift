@@ -34,6 +34,7 @@ enum HTTPProxy {
 
         var content = "", raw = ""
         var sawEvent = false
+        var usage: Any?   // 开启 stream_options.include_usage 后，最后一个数据块带 token 用量
         for try await line in bytes.lines {
             raw += line + "\n"
             guard line.hasPrefix("data:") else { continue }
@@ -44,12 +45,14 @@ enum HTTPProxy {
             if let error = json["error"] {
                 return Response(status: 500, body: (try? String(data: JSONSerialization.data(withJSONObject: ["error": error]), encoding: .utf8)) ?? payload)
             }
+            if let u = json["usage"], !(u is NSNull) { usage = u }
             let choice = (json["choices"] as? [[String: Any]])?.first
             if let delta = choice?["delta"] as? [String: Any], let piece = delta["content"] as? String { content += piece }
         }
         // 服务端没有按 SSE 返回（忽略了 stream 参数）时，原样交给前端解析。
         guard sawEvent else { return Response(status: status, body: raw) }
-        let wrapped: [String: Any] = ["choices": [["message": ["content": content]]]]
+        var wrapped: [String: Any] = ["choices": [["message": ["content": content]]]]
+        if let usage { wrapped["usage"] = usage }
         let data = try JSONSerialization.data(withJSONObject: wrapped)
         return Response(status: status, body: String(decoding: data, as: UTF8.self))
     }
