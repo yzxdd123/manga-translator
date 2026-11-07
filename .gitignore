@@ -1,0 +1,6 @@
+build/
+build-ios/
+DerivedData/
+xcuserdata/
+.DS_Store
+*.xcuserstate
